@@ -70,8 +70,8 @@ class YouCamService {
       const payload = {
         src_file_id: fileId,
         dst_actions: [
-          'hd_wrinkle',
-          'hd_acne'
+          'wrinkle',
+          'acne'
           
         ],
         format: 'json',
