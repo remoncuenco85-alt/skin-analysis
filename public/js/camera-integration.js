@@ -44,16 +44,15 @@ function startAnalysis() {
 
   try {
     YMK.init({
-      faceDetectionMode: 'skincare',  // Use HD for better quality
+      faceDetectionMode: 'skincare',
       imageFormat: 'base64',
       language: 'enu',
-      width: 400,
-      height: 500
+      width: 640,
+      height: 800
     });
     
     YMK.openCameraKit();
     
-    // Re-enable button after camera opens
     setTimeout(() => {
       button.disabled = false;
       button.textContent = '🎥 Start Skin Analysis';
@@ -103,7 +102,7 @@ async function handleCapturedImage(result) {
     console.log('✅ Analysis complete!', data);
     
     // Display results
-    displayResults(data);
+    displaySkinReport(data);
     
   } catch (error) {
     console.error('❌ Analysis error:', error);
@@ -125,83 +124,216 @@ function displayLoading() {
 }
 
 /**
- * Display analysis results
+ * Display comprehensive skin report
  */
-function displayResults(data) {
+function displaySkinReport(data) {
   const resultsDiv = document.getElementById('results');
   
-  let html = `
-    <div class="results-container">
-      <div class="results-header">
-        <h2>📊 Your Skin Analysis Results</h2>
-        <p>${data.summary.totalConcerns} area${data.summary.totalConcerns !== 1 ? 's' : ''} need attention</p>
-      </div>
-  `;
+  // Extract analysis data
+  const analysis = data.analysis.raw;
+  const concerns = data.concerns || [];
+  const products = data.recommendations || [];
   
-  // Display skin concerns
-  if (data.concerns && data.concerns.length > 0) {
-    html += `<div class="concerns-grid">`;
-    
-    data.concerns.forEach(concern => {
-      html += `
-        <div class="concern-card ${concern.severity}-severity">
-          <h3>${concern.displayName}</h3>
-          <div class="concern-score">${concern.score}/100</div>
-          <p><strong>Severity:</strong> ${concern.severity.toUpperCase()}</p>
-        </div>
-      `;
-    });
-    
-    html += `</div>`;
+  // Calculate overall score
+  const allScores = analysis.output.map(item => item.ui_score);
+  const overallScore = Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length);
+  
+  // Get skin age if available
+  let skinAge = 'N/A';
+  const skinAgeData = analysis.output.find(item => item.type === 'skin_age');
+  if (skinAgeData) {
+    skinAge = skinAgeData.value || skinAgeData.ui_score;
   }
   
-  // Display product recommendations
-  if (data.recommendations && data.recommendations.length > 0) {
+  let html = `
+    <div class="skin-report">
+      <div class="report-header">
+        <h2>YOUR SKIN REPORT</h2>
+        ${skinAge !== 'N/A' ? `<div class="skin-age-badge">🎂 Skin Age: ${skinAge}</div>` : ''}
+        <div class="overall-score">${overallScore}</div>
+        <p style="color: #666; font-size: 1.2em;">Overall Skin Score</p>
+      </div>
+
+      ${concerns.length > 0 ? `
+        <div class="concerns-alert">
+          <h3>⚠️ Areas Needing Attention (${concerns.length})</h3>
+          ${concerns.map(c => `<span class="concern-tag">${c.displayName}: ${c.score}/100</span>`).join('')}
+        </div>
+      ` : ''}
+
+      <div class="report-grid">
+        <div class="radar-section">
+          <h3>📊 Skin Score Matrix</h3>
+          <div class="chart-container">
+            <canvas id="radarChart"></canvas>
+          </div>
+        </div>
+
+        <div class="scores-section">
+          <h3>📈 Detailed Scores</h3>
+          ${generateScoresList(analysis.output)}
+        </div>
+      </div>
+    </div>
+  `;
+  
+  // Add product recommendations if available
+  if (products.length > 0) {
     html += `
       <div class="products-section">
         <h2>🛍️ Recommended Products for You</h2>
         <div class="products-grid">
-    `;
-    
-    data.recommendations.forEach(product => {
-      html += `
-        <div class="product-card">
-          ${product.image ? 
-            `<img src="${product.image}" alt="${product.imageAlt}" class="product-image">` :
-            `<div class="product-image"></div>`
-          }
-          <div class="product-info">
-            <div class="product-title">${product.title}</div>
-            <div class="product-price">$${product.price.toFixed(2)} ${product.currency}</div>
-            <div class="product-tag">${product.matchedConcern}</div>
-            <a href="${product.url}" target="_blank" class="product-button">
-              View Product →
-            </a>
-          </div>
+          ${products.map(product => `
+            <div class="product-card">
+              ${product.image ? 
+                `<img src="${product.image}" alt="${product.imageAlt}" class="product-image">` :
+                `<div class="product-image"></div>`
+              }
+              <div class="product-info">
+                <div class="product-title">${product.title}</div>
+                <div class="product-price">$${product.price.toFixed(2)} ${product.currency}</div>
+                <div class="product-concern">${product.matchedConcern}</div>
+                <a href="${product.url}" target="_blank" class="product-button">
+                  View Product →
+                </a>
+              </div>
+            </div>
+          `).join('')}
         </div>
-      `;
-    });
-    
-    html += `
-        </div>
-      </div>
-    `;
-  } else {
-    html += `
-      <div style="text-align: center; padding: 40px;">
-        <p style="font-size: 1.2em; color: #666;">
-          No product recommendations available. Make sure your Shopify products are properly tagged.
-        </p>
       </div>
     `;
   }
   
-  html += `</div>`;
+  html += `
+    <div class="powered-by">
+      Powered by Perfect Corp AI Technology
+    </div>
+  `;
   
   resultsDiv.innerHTML = html;
   
+  // Create radar chart
+  createRadarChart(analysis.output);
+  
   // Scroll to results
   resultsDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/**
+ * Generate scores list HTML
+ */
+function generateScoresList(output) {
+  const scoreNames = {
+    'wrinkle': 'Wrinkles',
+    'pore': 'Pores',
+    'texture': 'Texture',
+    'acne': 'Acne',
+    'oiliness': 'Oiliness',
+    'radiance': 'Radiance',
+    'moisture': 'Moisture',
+    'redness': 'Redness',
+    'age_spot': 'Age Spots',
+    'dark_circle_v2': 'Dark Circles',
+    'firmness': 'Firmness',
+    'eye_bag': 'Eye Bags',
+    'droopy_upper_eyelid': 'Upper Eyelid',
+    'droopy_lower_eyelid': 'Lower Eyelid'
+  };
+  
+  return output
+    .filter(item => scoreNames[item.type])
+    .map(item => {
+      const name = scoreNames[item.type];
+      const score = item.ui_score;
+      const severity = score >= 80 ? 'high' : score >= 65 ? 'medium' : 'low';
+      
+      return `
+        <div class="score-item ${severity}">
+          <span class="score-label">${name}</span>
+          <div class="score-bar">
+            <div class="score-bar-fill" style="width: ${score}%"></div>
+          </div>
+          <span class="score-value">${score}</span>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+/**
+ * Create radar chart visualization
+ */
+function createRadarChart(output) {
+  const scoreNames = {
+    'wrinkle': 'Wrinkles',
+    'pore': 'Pores',
+    'texture': 'Texture',
+    'acne': 'Acne',
+    'oiliness': 'Oiliness',
+    'radiance': 'Radiance',
+    'moisture': 'Moisture',
+    'redness': 'Redness',
+    'firmness': 'Firmness'
+  };
+  
+  const labels = [];
+  const scores = [];
+  
+  output.forEach(item => {
+    if (scoreNames[item.type]) {
+      labels.push(scoreNames[item.type]);
+      scores.push(item.ui_score);
+    }
+  });
+  
+  const ctx = document.getElementById('radarChart');
+  
+  new Chart(ctx, {
+    type: 'radar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Your Skin Scores',
+        data: scores,
+        fill: true,
+        backgroundColor: 'rgba(102, 126, 234, 0.2)',
+        borderColor: 'rgb(102, 126, 234)',
+        pointBackgroundColor: 'rgb(102, 126, 234)',
+        pointBorderColor: '#fff',
+        pointHoverBackgroundColor: '#fff',
+        pointHoverBorderColor: 'rgb(102, 126, 234)',
+        pointRadius: 5,
+        pointHoverRadius: 7
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      scales: {
+        r: {
+          beginAtZero: true,
+          max: 100,
+          ticks: {
+            stepSize: 20,
+            font: {
+              size: 12
+            }
+          },
+          pointLabels: {
+            font: {
+              size: 13,
+              weight: 'bold'
+            }
+          }
+        }
+      },
+      plugins: {
+        legend: {
+          display: false
+        }
+      }
+    }
+  });
 }
 
 /**
